@@ -3,6 +3,8 @@ name: Check PR Approval
 on:
   pull_request_review:
     types: [submitted]
+    branches:
+      - main
 
 permissions:
   pull-requests: read
