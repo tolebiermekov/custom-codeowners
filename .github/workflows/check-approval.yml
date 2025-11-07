@@ -12,128 +12,133 @@ jobs:
   check-approvals:
     runs-on: ubuntu-latest
     steps:
-      - name: 📥 Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 📦 Install micromatch (для glob-паттернов)
-        run: npm install micromatch
-
-      - name: 🕵️ Check Approvals using CODEOWNERS-DWH (Final Fix)
-        uses: actions/github-script@v7
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            const micromatch = require('micromatch');
-            
-            const CODEOWNERS_FILE = '.github/CODEOWNERS-DWH';
-            const prNumber = context.payload.pull_request.number;
-            const repo = context.repo.repo;
-            const owner = context.repo.owner;
-            
-            // --- 1. Парсинг файла CODEOWNERS-DWH (с фиксами) ---
-            let rules = [];
-            try {
-              const fileContent = fs.readFileSync(CODEOWNERS_FILE, 'utf8');
-              rules = fileContent.split('\n')
-                .map(line => line.trim())
-                .filter(line => line.length > 0 && !line.startsWith('#'))
-                .map(line => {
-                  const [rawPattern, ...ownerStrings] = line.split(/\s+/);
-            
-                  // ================================================================
-                  // 💡 ТРОЙНОЕ ИСПРАВЛЕНИЕ:
-                  // 1. `*` -> `**` (глобальный)
-                  // 2. `.../` -> `.../**` (все внутри)
-                  // 3. `/path` -> `path` (убираем ведущий слэш)
-                  // ================================================================
+          python-version: '3.12'
+
+      - name: 📦 Install Python dependencies
+        run: pip install requests pathspec
+
+      - name: Check Approvals (Python)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          import os
+          import sys
+          import json
+          import requests
+          import pathspec
+          
+          def fail(message):
+              print(f"::error::{message}")
+              sys.exit(1)
+          
+          TOKEN = os.environ['GITHUB_TOKEN']
+          HEADERS = {'Authorization': f'token {TOKEN}', 'Accept': 'application/vnd.github.v3+json'}
+          
+          try:
+              repo_full = os.environ['GITHUB_REPOSITORY']
+              owner, repo = repo_full.split('/')
+              
+              with open(os.environ['GITHUB_EVENT_PATH'], 'r') as f:
+                  event_data = json.load(f)
+              pr_number = event_data['pull_request']['number']
+          except Exception as e:
+              fail(f"Failed to get context: {e}")
+              
+          CODEOWNERS_FILE = '.github/CODEOWNERS-DWH'
+          
+          # Parse the CODEOWNERS-DWH
+          rules = []
+          try:
+              with open(CODEOWNERS_FILE, 'r') as f:
+                  for line in f:
+                      line = line.strip()
+                      if not line or line.startswith('#'):
+                          continue
+                      
+                      parts = line.split()
+                      raw_pattern = parts[0]
+                      owner_strings = parts[1:]
+                      
+                      pattern = '**' if raw_pattern == '*' else raw_pattern
+                      if pattern.endswith('/') and len(pattern) > 1:
+                          pattern += '**'
+                      if pattern.startswith('/'):
+                          pattern = pattern[1:]
+                      
+                      owners = set(o.replace('@', '') for o in owner_strings if '/' not in o)
+                      rules.append({'pattern': pattern, 'owners': owners})
+                      
+          except FileNotFoundError:
+              fail(f"Failed to read {CODEOWNERS_FILE}: File not found.")
+          except Exception as e:
+              fail(f"Failed to parse {CODEOWNERS_FILE}: {e}")
+          
+          # Get all changed files in PR
+          try:
+              files_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files'
+              response = requests.get(files_url, headers=HEADERS)
+              response.raise_for_status()
+              changed_files = [f['filename'] for f in response.json()]
+          except Exception as e:
+              fail(f"Failed to get changed files: {e}")
+          
+          # Get all users who Approved
+          try:
+              reviews_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews'
+              response = requests.get(reviews_url, headers=HEADERS)
+              response.raise_for_status()
+              
+              approved_users = set()
+              for review in response.json():
+                  if review['state'] == 'APPROVED':
+                      approved_users.add(review['user']['login'])
+                      
+              if not approved_users:
+                  fail('No "Approve" found on this PR.')
                   
-                  let pattern = (rawPattern === '*') 
-                                    ? '**' 
-                                    : (rawPattern.endsWith('/') && rawPattern.length > 1) 
-                                      ? rawPattern + '**' 
-                                      : rawPattern;
-                  
-                  // НОВЫЙ ФИКС: Убираем ведущий слэш
-                  if (pattern.startsWith('/')) {
-                    pattern = pattern.substring(1);
-                  }
-                  
-                  // ================================================================
-                  
-                  const owners = ownerStrings
-                    .filter(ownerStr => !ownerStr.includes('/')) 
-                    .map(ownerStr => ownerStr.replace('@', ''));
-            
-                  return { pattern, owners: new Set(owners) }; 
-                });
-            } catch (error) {
-              core.setFailed(`Не удалось прочитать ${CODEOWNERS_FILE}: ${error.message}`);
-              return;
-            }
-            
-            // --- 2. Получение всех измененных файлов в PR ---
-            const { data: changedFiles } = await github.rest.pulls.listFiles({
-              owner, repo, pull_number: prNumber
-            });
-            const changedFilePaths = changedFiles.map(f => f.filename);
-            
-            // --- 3. Получение всех, кто нажал "Approve" ---
-            const { data: reviews } = await github.rest.pulls.listReviews({
-              owner, repo, pull_number: prNumber
-            });
-            
-            const approvedUsers = new Set(
-              reviews
-                .filter(review => review.state === 'APPROVED')
-                .map(review => review.user.login)
-            );
-            
-            if (approvedUsers.size === 0) {
-              core.setFailed('❌ Нет ни одного "Approve" на этом PR.');
-              return;
-            }
-            console.log(`Найдено апрувов от: ${[...approvedUsers].join(', ')}`);
-            
-            // --- 4. "Per-File" проверка ---
-            
-            let allFilesCovered = true;
-            const uncoveredFiles = [];
-            
-            for (const file of changedFilePaths) {
-              let lastMatchOwners = null;
-              // Ищем "владельцев" файла (Last Match Wins)
-              for (const rule of rules) {
-                if (micromatch.isMatch(file, rule.pattern)) {
-                  lastMatchOwners = rule.owners;
-                }
-              }
-            
-              if (!lastMatchOwners || lastMatchOwners.size === 0) {
-                console.log(`Файл ${file} не требует "владельца". Пропускаем.`);
-                continue; 
-              }
-            
-              // Проверяем, есть ли "пересечение"
-              const intersection = new Set(
-                [...approvedUsers].filter(user => lastMatchOwners.has(user))
-              );
-            
-              if (intersection.size === 0) {
-                allFilesCovered = false;
-                uncoveredFiles.push(`- ${file} (требует: ${[...lastMatchOwners].join(', ')})`);
-              } else {
-                console.log(`Файл ${file} покрыт апрувом от: ${[...intersection].join(', ')}`);
-              }
-            }
-            
-            // --- 5. Финальный вердикт ---
-            if (allFilesCovered) {
-              console.log(`✅ Все измененные файлы покрыты "владельцами".`);
-              return; // Успех!
-            }
-            
-            core.setFailed(
-              `❌ Не все файлы покрыты апрувом. Апрувер(ы) ${[...approvedUsers].join(', ')} не имеют прав на:\n` +
-              uncoveredFiles.join('\n')
-            );
+              print(f"Found approvals from: {', '.join(approved_users)}")
+          except Exception as e:
+              fail(f"Failed to get reviews: {e}")
+          
+          # Checking logic
+          all_files_covered = True
+          uncovered_files = []
+          
+          for file in changed_files:
+              last_match_owners = None
+              
+              # Last Match Wins
+              for rule in rules:
+                  spec = pathspec.PathSpec.from_lines('gitwildmatch', [rule['pattern']])
+                  if spec.match_files([file]):
+                      last_match_owners = rule['owners']
+              
+              if not last_match_owners: # Covers None or empty set {}
+                  print(f"File {file} has no owner in CODEOWNERS-DWH. Failing.")
+                  all_files_covered = False
+                  uncovered_files.append(f"- {file} (has NO owner assigned in CODEOWNERS-DWH)")
+                  continue
+              
+              intersection = approved_users.intersection(last_match_owners)
+              
+              if not intersection:
+                  all_files_covered = False
+                  uncovered_files.append(f"- {file} (requires: {', '.join(last_match_owners)})")
+              else:
+                  print(f"File {file} is covered by approval from: {', '.join(intersection)}")
+          
+          if all_files_covered:
+              print("All changed files are covered by owners.")
+          else:
+              error_message = (
+                  f"Not all files are covered by approval. "
+                  f"Approver(s) {', '.join(approved_users)} do not have permissions for:\n"
+                  f"{'\n'.join(uncovered_files)}"
+              )
+              fail(error_message)
