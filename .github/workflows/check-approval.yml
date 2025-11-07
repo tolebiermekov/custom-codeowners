@@ -3,9 +3,6 @@ name: Check PR Approval
 on:
   pull_request_review:
     types: [submitted]
-  pull_request:
-    branches:
-      - main
 
 permissions:
   pull-requests: read
@@ -13,6 +10,7 @@ permissions:
 
 jobs:
   check-approvals:
+    if: github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
