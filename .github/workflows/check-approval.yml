@@ -32,7 +32,6 @@ jobs:
             const owner = context.repo.owner;
 
             let rules = [];
-            et rules = [];
             try {
               const fileContent = fs.readFileSync(CODEOWNERS_FILE, 'utf8');
               rules = fileContent.split('\n')
