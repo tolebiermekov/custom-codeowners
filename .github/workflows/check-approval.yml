@@ -21,7 +21,7 @@ jobs:
           python-version: '3.10'
 
       - name: 📦 Install Python dependencies
-        run: pip install pathspec # requests больше не нужен, но pathspec все еще необходим
+        run: pip install pathspec
 
       - name: 🕵️ Check Approvals (Python)
         env:
@@ -32,7 +32,7 @@ jobs:
           import sys
           import json
           import pathspec
-          import urllib.request # <-- Используем стандартную библиотеку
+          import urllib.request
           import urllib.error
           
           # --- 0. Helper functions ---
@@ -155,10 +155,11 @@ jobs:
           if all_files_covered:
               print("All changed files are covered by owners.")
           else:
+              uncovered_files_str = '\n'.join(uncovered_files)
               error_message = (
                   f"Not all files are covered by approval. "
                   f"Approver(s) {', '.join(approved_users)} do not have permissions for:\n"
-                  f"{'\n'.join(uncovered_files)}"
+                  f"{uncovered_files_str}"
               )
               fail(error_message)
           EOF
