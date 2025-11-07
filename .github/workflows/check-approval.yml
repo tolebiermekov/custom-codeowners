@@ -1,4 +1,4 @@
-name: 🛂 Check PR Approval (CODEOWNERS-DWH)
+name: Check PR Approval
 
 on:
   pull_request_review:
@@ -12,18 +12,18 @@ jobs:
   check-approvals:
     runs-on: ubuntu-latest
     steps:
-      - name: 📥 Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🐍 Set up Python
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
-      - name: 📦 Install Python dependencies
+      - name: Install Python dependencies
         run: pip install pathspec
 
-      - name: 🕵️ Check Approvals (Python)
+      - name: Check Approvals
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -35,13 +35,11 @@ jobs:
           import urllib.request
           import urllib.error
           
-          # --- 0. Helper functions ---
           def fail(message):
               print(f"::error::{message}")
               sys.exit(1)
           
           def make_request(url, headers):
-              """Helper to make GitHub API requests using standard library"""
               req = urllib.request.Request(url, headers=headers)
               try:
                   with urllib.request.urlopen(req) as response:
@@ -53,7 +51,6 @@ jobs:
               except Exception as e:
                   fail(f"Failed during request to {url}: {e}")
 
-          # --- 1. Get Context and Headers ---
           TOKEN = os.environ['GITHUB_TOKEN']
           HEADERS = {'Authorization': f'token {TOKEN}', 'Accept': 'application/vnd.github.v3+json'}
           
@@ -69,7 +66,7 @@ jobs:
               
           CODEOWNERS_FILE = '.github/CODEOWNERS-DWH'
           
-          # --- 2. Parse the CODEOWNERS-DWH file (with fixes) ---
+          # Parse the CODEOWNERS-DWH
           rules = []
           try:
               with open(CODEOWNERS_FILE, 'r') as f:
@@ -82,13 +79,11 @@ jobs:
                       raw_pattern = parts[0]
                       owner_strings = parts[1:]
                       
-                      # --- TRIPLE FIX ---
                       pattern = '**' if raw_pattern == '*' else raw_pattern
                       if pattern.endswith('/') and len(pattern) > 1:
                           pattern += '**'
                       if pattern.startswith('/'):
                           pattern = pattern[1:]
-                      # --- End Fix ---
                       
                       owners = set(o.replace('@', '') for o in owner_strings if '/' not in o)
                       rules.append({'pattern': pattern, 'owners': owners})
@@ -98,7 +93,7 @@ jobs:
           except Exception as e:
               fail(f"Failed to parse {CODEOWNERS_FILE}: {e}")
           
-          # --- 3. Get all changed files in PR (using urllib) ---
+          # Get all changed files in PR
           try:
               files_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files'
               files_json = make_request(files_url, HEADERS)
@@ -106,7 +101,7 @@ jobs:
           except Exception as e:
               fail(f"Failed to get changed files: {e}")
           
-          # --- 4. Get all users who clicked 'Approve' (using urllib) ---
+          # Get all users who clicked Approved
           try:
               reviews_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews'
               reviews_json = make_request(reviews_url, HEADERS)
@@ -123,14 +118,14 @@ jobs:
           except Exception as e:
               fail(f"Failed to get reviews: {e}")
           
-          # --- 5. "Per-File" checking logic (NEW: files without owners will FAIL) ---
+          # Checking logic
           all_files_covered = True
           uncovered_files = []
           
           for file in changed_files:
               last_match_owners = None
               
-              # Find owners for this file (Last Match Wins)
+              # Last Match Wins
               for rule in rules:
                   spec = pathspec.PathSpec.from_lines('gitwildmatch', [rule['pattern']])
                   if spec.match_files([file]):
@@ -144,14 +139,12 @@ jobs:
               
               # Check for intersection
               intersection = approved_users.intersection(last_match_owners)
-              
               if not intersection:
                   all_files_covered = False
                   uncovered_files.append(f"- {file} (requires: {', '.join(last_match_owners)})")
               else:
-                  print(f"File {file} is covered by approval from: {', '.join(intersection)}")
+                  print(f"PR is covered by approval from: {', '.join(intersection)}")
           
-          # --- 6. Final verdict ---
           if all_files_covered:
               print("All changed files are covered by owners.")
           else:
