@@ -25,12 +25,13 @@ jobs:
           script: |
             const fs = require('fs');
             const micromatch = require('micromatch');
-
+            
             const CODEOWNERS_FILE = '.github/CODEOWNERS-DWH';
             const prNumber = context.payload.pull_request.number;
             const repo = context.repo.repo;
             const owner = context.repo.owner;
-
+            
+            // --- 1. Парсинг файла CODEOWNERS-DWH (с фиксами) ---
             let rules = [];
             try {
               const fileContent = fs.readFileSync(CODEOWNERS_FILE, 'utf8');
@@ -39,43 +40,32 @@ jobs:
                 .filter(line => line.length > 0 && !line.startsWith('#'))
                 .map(line => {
                   const [rawPattern, ...ownerStrings] = line.split(/\s+/);
-                  
+            
+                  // "Переводим" `*` -> `**` и `**/folder/` -> `**/folder/**`
                   const pattern = (rawPattern === '*') 
                                     ? '**' 
                                     : (rawPattern.endsWith('/') && rawPattern.length > 1) 
                                       ? rawPattern + '**' 
                                       : rawPattern;
-                  
+            
                   const owners = ownerStrings
                     .filter(ownerStr => !ownerStr.includes('/')) 
                     .map(ownerStr => ownerStr.replace('@', ''));
-
-                  return { pattern, owners }; // Используем 'pattern', а не 'rawPattern'
+            
+                  return { pattern, owners: new Set(owners) }; 
                 });
             } catch (error) {
               core.setFailed(`Не удалось прочитать ${CODEOWNERS_FILE}: ${error.message}`);
               return;
             }
-
+            
+            // --- 2. Получение всех измененных файлов в PR ---
             const { data: changedFiles } = await github.rest.pulls.listFiles({
               owner, repo, pull_number: prNumber
             });
             const changedFilePaths = changedFiles.map(f => f.filename);
-
-            // Last Match Wins
-            const requiredOwners = new Set();
-            for (const file of changedFilePaths) {
-              let lastMatch = null;
-              for (const rule of rules) {
-                if (micromatch.isMatch(file, rule.pattern)) {
-                  lastMatch = rule;
-                }
-              }
-              if (lastMatch) {
-                lastMatch.owners.forEach(owner => requiredOwners.add(owner));
-              }
-            }
-
+            
+            // --- 3. Получение всех, кто нажал "Approve" ---
             const { data: reviews } = await github.rest.pulls.listReviews({
               owner, repo, pull_number: prNumber
             });
@@ -85,16 +75,58 @@ jobs:
                 .filter(review => review.state === 'APPROVED')
                 .map(review => review.user.login)
             );
-
-            const intersection = new Set(
-              [...approvedUsers].filter(user => requiredOwners.has(user))
-            );
-
-            if (intersection.size > 0) {
-              console.log(`Approved by: ${[...intersection].join(', ')}`);
-              return; 
+            
+            if (approvedUsers.size === 0) {
+              core.setFailed('❌ Нет ни одного "Approve" на этом PR.');
+              return;
             }
-
+            console.log(`Найдено апрувов от: ${[...approvedUsers].join(', ')}`);
+            
+            // --- 4. НОВАЯ ЛОГИКА: "Per-File" (по-файловая) проверка ---
+            
+            let allFilesCovered = true;
+            const uncoveredFiles = []; // Собираем файлы, которые "не покрыты" апрувом
+            const allRequiredOwners = new Set(); // Собираем всех, кто мог бы апрувить
+            
+            for (const file of changedFilePaths) {
+              let lastMatchOwners = null;
+              // Ищем "владельцев" файла (Last Match Wins)
+              for (const rule of rules) {
+                if (micromatch.isMatch(file, rule.pattern)) {
+                  lastMatchOwners = rule.owners;
+                }
+              }
+            
+              if (!lastMatchOwners || lastMatchOwners.size === 0) {
+                // У этого файла нет "владельцев", он не требует апрува
+                console.log(`Файл ${file} не требует "владельца". Пропускаем.`);
+                continue; 
+              }
+            
+              // Добавляем "владельцев" этого файла в общий список для лога
+              lastMatchOwners.forEach(owner => allRequiredOwners.add(owner));
+            
+              // Проверяем, есть ли "пересечение"
+              const intersection = new Set(
+                [...approvedUsers].filter(user => lastMatchOwners.has(user))
+              );
+            
+              if (intersection.size === 0) {
+                // Ни один из тех, кто апрувил, НЕ МОЖЕТ апрувить ЭТОТ файл!
+                allFilesCovered = false;
+                uncoveredFiles.push(`- ${file} (требует: ${[...lastMatchOwners].join(', ')})`);
+              } else {
+                console.log(`Файл ${file} покрыт апрувом от: ${[...intersection].join(', ')}`);
+              }
+            }
+            
+            // --- 5. Финальный вердикт ---
+            if (allFilesCovered) {
+              console.log(`✅ Все измененные файлы покрыты "владельцами".`);
+              return; // Успех!
+            }
+            
             core.setFailed(
-              `❌ Требуется "approve" от одного из 'владельцев' для измененных файлов: ${[...requiredOwners].join(', ')}`
+              `❌ Не все файлы покрыты апрувом. Апрувер(ы) ${[...approvedUsers].join(', ')} не имеют прав на:\n` +
+              uncoveredFiles.join('\n')
             );
