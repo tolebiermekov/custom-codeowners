@@ -1,4 +1,4 @@
-name: Check PR Approval
+name: 🛂 Check PR Approval (CODEOWNERS-DWH)
 
 on:
   pull_request_review:
@@ -12,13 +12,13 @@ jobs:
   check-approvals:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install micromatch
+      - name: 📦 Install micromatch (для glob-паттернов)
         run: npm install micromatch
 
-      - name: Check Approvals using CODEOWNERS-DWH
+      - name: 🕵️ Check Approvals using CODEOWNERS-DWH (Final Fix)
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -41,13 +41,26 @@ jobs:
                 .map(line => {
                   const [rawPattern, ...ownerStrings] = line.split(/\s+/);
             
-                  // "Переводим" `*` -> `**` и `**/folder/` -> `**/folder/**`
-                  const pattern = (rawPattern === '*') 
+                  // ================================================================
+                  // 💡 ТРОЙНОЕ ИСПРАВЛЕНИЕ:
+                  // 1. `*` -> `**` (глобальный)
+                  // 2. `.../` -> `.../**` (все внутри)
+                  // 3. `/path` -> `path` (убираем ведущий слэш)
+                  // ================================================================
+                  
+                  let pattern = (rawPattern === '*') 
                                     ? '**' 
                                     : (rawPattern.endsWith('/') && rawPattern.length > 1) 
                                       ? rawPattern + '**' 
                                       : rawPattern;
-            
+                  
+                  // НОВЫЙ ФИКС: Убираем ведущий слэш
+                  if (pattern.startsWith('/')) {
+                    pattern = pattern.substring(1);
+                  }
+                  
+                  // ================================================================
+                  
                   const owners = ownerStrings
                     .filter(ownerStr => !ownerStr.includes('/')) 
                     .map(ownerStr => ownerStr.replace('@', ''));
@@ -82,11 +95,10 @@ jobs:
             }
             console.log(`Найдено апрувов от: ${[...approvedUsers].join(', ')}`);
             
-            // --- 4. НОВАЯ ЛОГИКА: "Per-File" (по-файловая) проверка ---
+            // --- 4. "Per-File" проверка ---
             
             let allFilesCovered = true;
-            const uncoveredFiles = []; // Собираем файлы, которые "не покрыты" апрувом
-            const allRequiredOwners = new Set(); // Собираем всех, кто мог бы апрувить
+            const uncoveredFiles = [];
             
             for (const file of changedFilePaths) {
               let lastMatchOwners = null;
@@ -98,13 +110,9 @@ jobs:
               }
             
               if (!lastMatchOwners || lastMatchOwners.size === 0) {
-                // У этого файла нет "владельцев", он не требует апрува
                 console.log(`Файл ${file} не требует "владельца". Пропускаем.`);
                 continue; 
               }
-            
-              // Добавляем "владельцев" этого файла в общий список для лога
-              lastMatchOwners.forEach(owner => allRequiredOwners.add(owner));
             
               // Проверяем, есть ли "пересечение"
               const intersection = new Set(
@@ -112,7 +120,6 @@ jobs:
               );
             
               if (intersection.size === 0) {
-                // Ни один из тех, кто апрувил, НЕ МОЖЕТ апрувить ЭТОТ файл!
                 allFilesCovered = false;
                 uncoveredFiles.push(`- ${file} (требует: ${[...lastMatchOwners].join(', ')})`);
               } else {
