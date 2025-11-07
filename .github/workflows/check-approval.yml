@@ -34,11 +34,11 @@ jobs:
           import pathspec
           import urllib.request
           import urllib.error
-
+          
           def fail(message):
               print(f"::error::{message}")
               sys.exit(1)
-
+          
           def make_request(url, headers):
               req = urllib.request.Request(url, headers=headers)
               try:
@@ -50,22 +50,25 @@ jobs:
                   fail(f"HTTPError when requesting {url}: {e.code} {e.reason}")
               except Exception as e:
                   fail(f"Failed during request to {url}: {e}")
-
+          
           TOKEN = os.environ['GITHUB_TOKEN']
           HEADERS = {'Authorization': f'token {TOKEN}', 'Accept': 'application/vnd.github.v3+json'}
-
+          
           try:
               repo_full = os.environ['GITHUB_REPOSITORY']
               owner, repo = repo_full.split('/')
+          
               with open(os.environ['GITHUB_EVENT_PATH'], 'r') as f:
                   event_data = json.load(f)
               pr_number = event_data['pull_request']['number']
           except Exception as e:
               fail(f"Failed to get context: {e}")
-
+          
           CODEOWNERS_FILE = '.github/CODEOWNERS-DWH'
-
-          # Parse the CODEOWNERS-DWH
+          
+          # -----------------------------------------------------------------
+          # ⬇️⬇️⬇️ ИЗМЕНЕНИЯ ТОЛЬКО ЗДЕСЬ ⬇️⬇️⬇️
+          # -----------------------------------------------------------------
           rules = []
           try:
               with open(CODEOWNERS_FILE, 'r') as f:
@@ -73,23 +76,42 @@ jobs:
                       line = line.strip()
                       if not line or line.startswith('#'):
                           continue
-
+          
                       parts = line.split()
                       raw_pattern = parts[0]
                       owner_strings = parts[1:]
-
-                      # ⚠️ Без добавлений * или ** — используем как есть
-                      pattern = raw_pattern.lstrip('/')
-
+          
+                      pattern = raw_pattern
+          
+                      # 1. Глобальный паттерн
+                      if pattern == '*':
+                          pattern = '**'
+          
+                      # 2. Обработка паттернов, привязанных к корню (начинаются с /)
+                      elif pattern.startswith('/'):
+                          pattern = pattern[1:] # Убираем / в начале
+          
+                      # 3. Обработка паттернов НЕ у корня
+                      elif not pattern.startswith('**'):
+                          pattern = '**/' + pattern
+          
+                      # 4. Паттерны-директории (заканчиваются на /)
+                      if pattern.endswith('/'):
+                          pattern += '**'
+          
                       owners = set(o.replace('@', '') for o in owner_strings if '/' not in o)
                       rules.append({'pattern': pattern, 'owners': owners})
-                      print(f"DEBUG: Loaded rule -> pattern='{pattern}', owners={owners}")
-
+                      print(f"DEBUG: Loaded rule -> raw='{raw_pattern}', pattern='{pattern}', owners={owners}")
+          
           except FileNotFoundError:
               fail(f"Failed to read {CODEOWNERS_FILE}: File not found.")
           except Exception as e:
               fail(f"Failed to parse {CODEOWNERS_FILE}: {e}")
-
+          
+          # -----------------------------------------------------------------
+          # ⬆️⬆️⬆️ ИЗМЕНЕНИЯ ТОЛЬКО ЗДЕСЬ ⬆️⬆️⬆️
+          # -----------------------------------------------------------------
+          
           # Get all changed files in PR
           try:
               files_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files'
@@ -98,54 +120,54 @@ jobs:
               print(f"DEBUG: Found changed files: {changed_files}")
           except Exception as e:
               fail(f"Failed to get changed files: {e}")
-
+          
           # Get all users who clicked Approved
           try:
               reviews_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews'
               reviews_json = make_request(reviews_url, HEADERS)
-
+          
               approved_users = set()
               for review in reviews_json:
                   if review['state'] == 'APPROVED':
                       approved_users.add(review['user']['login'])
-
+          
               if not approved_users:
                   fail('No "Approve" found on this PR.')
-
+          
               print(f"Found approvals from: {', '.join(approved_users)}")
           except Exception as e:
               fail(f"Failed to get reviews: {e}")
-
+          
           # Checking logic
           all_files_covered = True
           uncovered_files = []
-
+          
           for file in changed_files:
               print(f"\nDEBUG: Checking file: {file}")
               last_match_owners = None
-
+          
               # Last Match Wins
               for rule in rules:
                   spec = pathspec.PathSpec.from_lines('gitwildmatch', [rule['pattern']])
                   if spec.match_files([file]):
                       last_match_owners = rule['owners']
                       print(f"DEBUG: -> Matched pattern '{rule['pattern']}', owner is now: {last_match_owners}")
-
+          
               print(f"DEBUG: -> Final owner for {file}: {last_match_owners}")
-
+          
               if not last_match_owners:
                   print(f"File {file} has no owner in CODEOWNERS-DWH. Failing.")
                   all_files_covered = False
                   uncovered_files.append(f"- {file} (has NO owner assigned in CODEOWNERS-DWH)")
                   continue
-
+          
               intersection = approved_users.intersection(last_match_owners)
               if not intersection:
                   all_files_covered = False
                   uncovered_files.append(f"- {file} (requires: {', '.join(last_match_owners)})")
               else:
                   print(f"PR is covered by approval from: {', '.join(intersection)}")
-
+          
           if all_files_covered:
               print("✅ All changed files are covered by owners.")
           else:
