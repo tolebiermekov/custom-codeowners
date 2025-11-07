@@ -20,9 +20,6 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install Python dependencies
-        run: pip install pathspec
-
       - name: Check Approvals
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -31,7 +28,7 @@ jobs:
           import os
           import sys
           import json
-          import fnmatch  # <-- Используем fnmatch
+          import fnmatch
           import urllib.request
           import urllib.error
           
@@ -66,9 +63,7 @@ jobs:
           
           CODEOWNERS_FILE = '.github/CODEOWNERS-DWH'
           
-          # -----------------------------------------------------------------
-          # ⬇️ ИСПРАВЛЕННЫЙ ПАРСЕР ⬇️
-          # -----------------------------------------------------------------
+          # Parse the CODEOWNERS-DWH
           rules = []
           try:
               with open(CODEOWNERS_FILE, 'r') as f:
@@ -90,71 +85,48 @@ jobs:
           
                       owners = set(o.replace('@', '') for o in owner_strings if '/' not in o)
                       rules.append({'pattern': pattern, 'owners': owners})
-                      print(f"DEBUG: Loaded rule -> raw='{raw_pattern}', pattern='{pattern}', owners={owners}")
           
           except FileNotFoundError:
               fail(f"Failed to read {CODEOWNERS_FILE}: File not found.")
           except Exception as e:
               fail(f"Failed to parse {CODEOWNERS_FILE}: {e}")
-          # -----------------------------------------------------------------
-          # ⬆️ КОНЕЦ ПАРСЕРА ⬆️
-          # -----------------------------------------------------------------
           
-          # -----------------------------------------------------------------
-          # ⬇️ БЛОК, КОТОРЫЙ ПРОПАЛ (changed_files) ⬇️
-          # -----------------------------------------------------------------
+          # Get all changed files in PR
           try:
               files_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files'
               files_json = make_request(files_url, HEADERS)
               changed_files = [f['filename'] for f in files_json]
-              print(f"DEBUG: Found changed files: {changed_files}")
           except Exception as e:
               fail(f"Failed to get changed files: {e}")
-          # -----------------------------------------------------------------
           
-          # -----------------------------------------------------------------
-          # ⬇️ БЛОК, КОТОРЫЙ ПРОПАЛ (approved_users) ⬇️
-          # -----------------------------------------------------------------
+          # Get all users who clicked Approved
           try:
               reviews_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews'
               reviews_json = make_request(reviews_url, HEADERS)
           
-              approved_users = set()
-              for review in reviews_json:
-                  if review['state'] == 'APPROVED':
-                      approved_users.add(review['user']['login'])
-          
+              approved_users = {
+                  review['user']['login']
+                  for review in reviews_json
+                  if review['state'] == 'APPROVED'
+              }
               if not approved_users:
                   fail('No "Approve" found on this PR.')
-          
               print(f"Found approvals from: {', '.join(approved_users)}")
           except Exception as e:
               fail(f"Failed to get reviews: {e}")
-          # -----------------------------------------------------------------
           
-          # -----------------------------------------------------------------
-          # ⬇️ НОВАЯ ЛОГИКА ПРОВЕРКИ (fnmatch) ⬇️
-          # -----------------------------------------------------------------
+          # Checking logic
           all_files_covered = True
           uncovered_files = []
           
           for file in changed_files:
-              print(f"\nDEBUG: Checking file: {file}")
               last_match_owners = None
           
               # Last Match Wins
               for rule in rules:
-          
-                  # Используем fnmatch
-                  # 1. Прямое совпадение (для **, *.*, **/shared/**)
-                  # 2. Проверка на директорию (если паттерн 'config/other/' и файл 'config/other/file.sql')
                   if fnmatch.fnmatch(file, rule['pattern']) or \
                      (rule['pattern'].endswith('/') and file.startswith(rule['pattern'])):
-          
                       last_match_owners = rule['owners']
-                      print(f"DEBUG: -> Matched pattern '{rule['pattern']}', owner is now: {last_match_owners}")
-          
-              print(f"DEBUG: -> Final owner for {file}: {last_match_owners}")
           
               if not last_match_owners:
                   print(f"File {file} has no owner in CODEOWNERS-DWH. Failing.")
@@ -170,11 +142,11 @@ jobs:
                   print(f"PR is covered by approval from: {', '.join(intersection)}")
           
           if all_files_covered:
-              print("✅ All changed files are covered by owners.")
+              print("All changed files are covered by owners.")
           else:
               uncovered_files_str = '\n'.join(uncovered_files)
               error_message = (
-                  f"❌ Not all files are covered by approval. "
+                  f"Not all files are covered by approval. "
                   f"Approver(s) {', '.join(approved_users)} do not have permissions for:\n"
                   f"{uncovered_files_str}"
               )
