@@ -1,3 +1,3 @@
 * @ml24-sys
-config/other/ @tolebiermekov
-config/other/**/shared/** @ml24-sys
+/config/other/ @tolebiermekov
+/config/other/**/shared/** @ml24-sys
