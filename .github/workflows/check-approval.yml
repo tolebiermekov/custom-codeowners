@@ -31,9 +31,16 @@ jobs:
           import fnmatch
           import urllib.request
           import urllib.error
+          import logging
+          
+          logging.basicConfig(
+              level=logging.INFO,
+              format='%(message)s',
+              stream=sys.stdout
+          )
           
           def fail(message):
-              print(f"::error::{message}")
+              logging.error(f"::error::{message}")
               sys.exit(1)
           
           def make_request(url, headers):
@@ -111,7 +118,7 @@ jobs:
               }
               if not approved_users:
                   fail('No "Approve" found on this PR.')
-              print(f"Found approvals from: {', '.join(approved_users)}")
+              logging.info(f"Found approvals from: {', '.join(approved_users)}")
           except Exception as e:
               fail(f"Failed to get reviews: {e}")
           
@@ -129,7 +136,7 @@ jobs:
                       last_match_owners = rule['owners']
           
               if not last_match_owners:
-                  print(f"File {file} has no owner in CODEOWNERS-DWH. Failing.")
+                  logging.warning(f"File {file} has no owner in CODEOWNERS-DWH. Failing.")
                   all_files_covered = False
                   uncovered_files.append(f"- {file} (has NO owner assigned in CODEOWNERS-DWH)")
                   continue
@@ -139,10 +146,10 @@ jobs:
                   all_files_covered = False
                   uncovered_files.append(f"- {file} (requires: {', '.join(last_match_owners)})")
               else:
-                  print(f"PR is covered by approval from: {', '.join(intersection)}")
+                  logging.info(f"PR is covered by approval from: {', '.join(intersection)}")
           
           if all_files_covered:
-              print("All changed files are covered by owners.")
+              logging.info("All changed files are covered by owners.")
           else:
               uncovered_files_str = '\n'.join(uncovered_files)
               error_message = (
