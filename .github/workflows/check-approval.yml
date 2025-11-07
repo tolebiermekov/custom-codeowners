@@ -1,0 +1,94 @@
+name: Check PR Approval
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  pull-requests: read
+  contents: read
+
+jobs:
+  check-approvals:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install micromatch
+        run: npm install micromatch
+
+      - name: Check Approvals using CODEOWNERS-DWH
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const micromatch = require('micromatch');
+
+            const CODEOWNERS_FILE = '.github/CODEOWNERS-DWH';
+            const prNumber = context.payload.pull_request.number;
+            const repo = context.repo.repo;
+            const owner = context.repo.owner;
+
+            let rules = [];
+            try {
+              const fileContent = fs.readFileSync(CODEOWNERS_FILE, 'utf8');
+              rules = fileContent.split('\n')
+                .map(line => line.trim())
+                .filter(line => line.length > 0 && !line.startsWith('#'))
+                .map(line => {
+                  const [pattern, ...ownerStrings] = line.split(/\s+/);
+                  
+                  const owners = ownerStrings
+                    .filter(ownerStr => !ownerStr.includes('/')) 
+                    .map(ownerStr => ownerStr.replace('@', ''));
+
+                  return { pattern, owners };
+                });
+            } catch (error) {
+              core.setFailed(`Не удалось прочитать ${CODEOWNERS_FILE}: ${error.message}`);
+              return;
+            }
+
+            const { data: changedFiles } = await github.rest.pulls.listFiles({
+              owner, repo, pull_number: prNumber
+            });
+            const changedFilePaths = changedFiles.map(f => f.filename);
+
+            // Last Match Wins
+            const requiredOwners = new Set();
+            for (const file of changedFilePaths) {
+              let lastMatch = null;
+              for (const rule of rules) {
+                if (micromatch.isMatch(file, rule.pattern)) {
+                  lastMatch = rule;
+                }
+              }
+              if (lastMatch) {
+                lastMatch.owners.forEach(owner => requiredOwners.add(owner));
+              }
+            }
+
+            const { data: reviews } = await github.rest.pulls.listReviews({
+              owner, repo, pull_number: prNumber
+            });
+            
+            const approvedUsers = new Set(
+              reviews
+                .filter(review => review.state === 'APPROVED')
+                .map(review => review.user.login)
+            );
+
+            const intersection = new Set(
+              [...approvedUsers].filter(user => requiredOwners.has(user))
+            );
+
+            if (intersection.size > 0) {
+              console.log(`Approved by: ${[...intersection].join(', ')}`);
+              return; 
+            }
+
+            core.setFailed(
+              `❌ Требуется "approve" от одного из 'владельцев' для измененных файлов: ${[...requiredOwners].join(', ')}`
+            );
