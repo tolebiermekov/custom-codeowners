@@ -32,19 +32,26 @@ jobs:
             const owner = context.repo.owner;
 
             let rules = [];
+            et rules = [];
             try {
               const fileContent = fs.readFileSync(CODEOWNERS_FILE, 'utf8');
               rules = fileContent.split('\n')
                 .map(line => line.trim())
                 .filter(line => line.length > 0 && !line.startsWith('#'))
                 .map(line => {
-                  const [pattern, ...ownerStrings] = line.split(/\s+/);
+                  const [rawPattern, ...ownerStrings] = line.split(/\s+/);
+                  
+                  const pattern = (rawPattern === '*') 
+                                    ? '**' 
+                                    : (rawPattern.endsWith('/') && rawPattern.length > 1) 
+                                      ? rawPattern + '**' 
+                                      : rawPattern;
                   
                   const owners = ownerStrings
                     .filter(ownerStr => !ownerStr.includes('/')) 
                     .map(ownerStr => ownerStr.replace('@', ''));
 
-                  return { pattern, owners };
+                  return { pattern, owners }; // Используем 'pattern', а не 'rawPattern'
                 });
             } catch (error) {
               core.setFailed(`Не удалось прочитать ${CODEOWNERS_FILE}: ${error.message}`);
