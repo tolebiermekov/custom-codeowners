@@ -33,7 +33,7 @@ jobs:
           import urllib.error
           import logging
           from pathlib import Path
-          import shlex # <-- ИМПОРТИРУЕМ SHLEX
+          import shlex
           
           logging.basicConfig(
               level=logging.INFO,
@@ -71,33 +71,26 @@ jobs:
               fail(f"Failed to get context: {e}")
           
           CODEOWNERS_FILE = '.github/CODEOWNERS-DWH'
-          
-          # === НОВАЯ ЛОГИКА ПАРСИНГА (SHLEX) ===
+
           rules = []
           try:
               with open(CODEOWNERS_FILE, 'r') as f:
                   for line_number, line in enumerate(f, 1):
-                      # 1. Убираем комментарии и лишние пробелы
                       line = line.split('#', 1)[0].strip()
-                      
                       if not line:
                           continue
           
-                      # 2. Используем shlex для "умного" разделения
                       try:
                           parts = shlex.split(line)
                       except ValueError as e:
                           logging.warning(f"Skipping malformed line {line_number}: {line} | Error: {e}")
                           continue
-
+          
                       if not parts:
                            continue
                            
-                      # 3. Первый элемент - паттерн, остальные - владельцы
                       raw_pattern = parts[0]
                       owner_strings = parts[1:]
-                      
-                      # 4. Вся остальная логика остается прежней
                       if raw_pattern.startswith('/'):
                           pattern = raw_pattern[1:]
                       else:
@@ -121,9 +114,7 @@ jobs:
               fail(f"Failed to read {CODEOWNERS_FILE}: File not found.")
           except Exception as e:
               fail(f"Failed to parse {CODEOWNERS_FILE}: {e}")
-          
-          # === КОНЕЦ НОВОЙ ЛОГИКИ ПАРСИНГА ===
-          
+
           try:
               files_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files'
               files_json = make_request(files_url, HEADERS)
