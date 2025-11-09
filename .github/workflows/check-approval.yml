@@ -81,6 +81,7 @@ jobs:
                               continue
                           
                           try:
+                              # Safely parse paths with spaces
                               parts = shlex.split(line)
                           except ValueError as e:
                               logging.warning(f"Skipping malformed line {line_number}: {line} | Error: {e}")
@@ -97,23 +98,26 @@ jobs:
                           elif raw_pattern == '**':
                               patterns_to_check.append('**')
                           elif raw_pattern.startswith('/'):
-                              patterns_to_check.append(raw_pattern[1:])
+                              patterns_to_check.append(raw_pattern[1:])  # Root-anchored path
                           else:
-                              patterns_to_check.append(raw_pattern)  
-                              patterns_to_check.append(f"**/{raw_pattern}") 
+                              patterns_to_check.append(raw_pattern)
+                              patterns_to_check.append(f"**/{raw_pattern}")
           
                           final_patterns = []
                           for p in patterns_to_check:
+                              # Edge case: '.../**' must become '.../**/*' to match files
                               if p.endswith('/**') and p != '**':
                                   final_patterns.append(f"{p}/*")
                               else:
                                   final_patterns.append(p)
 
+                          # This script intentionally ignores team owners (@org/team)
                           owners = {o.replace('@', '') for o in owner_strings if '/' not in o}
                           if not owners:
                               logging.warning(f"No owners found for pattern on line {line_number}: {raw_pattern}")
                               continue
                               
+                          # Store a list of patterns for each rule
                           rules.append({'patterns': final_patterns, 'owners': owners})
               
               except FileNotFoundError:
@@ -140,6 +144,8 @@ jobs:
 
           def check_file_coverage(changed_files, rules, approved_users):
               uncovered_files_list = []
+              
+              # Reverse rules to turn "Last Match Wins" into "First Match Wins"
               reversed_rules = list(reversed(rules))
 
               for file_path in changed_files:
@@ -150,7 +156,7 @@ jobs:
                               found_owners = rule['owners']
                               break 
                       if found_owners:
-                          break # (First Match Wins)
+                          break
                   
                   if not found_owners:
                       logging.warning(f"File {file_path} has no owner in CODEOWNERS-DWH. Failing.")
