@@ -1,2 +1,2 @@
-/README.md @ml24-sys
-services.py @tolebiermekov
+/config/other/docs/** @tolebiermekov
+/config/other/docs/shared/* @ml24-sys
