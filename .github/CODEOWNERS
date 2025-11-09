@@ -1,2 +1,2 @@
-* @ml24-sys
-** @tolebiermekov
+/config/other/docs/** @tolebiermekov
+/config/other/docs/shared/* @ml24-sys
