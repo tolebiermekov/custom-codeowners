@@ -138,7 +138,7 @@ jobs:
 
           def get_approved_users(owner, repo, pr_number):
               reviews_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews'
-              reviews_json = make_request(reviews_url)
+              reviews_json = make_request(reviews_json)
               approved_users = {
                   review['user']['login']
                   for review in reviews_json
@@ -155,9 +155,12 @@ jobs:
               for file_path in changed_files:
                   found_owners = None
                   for rule in reversed_rules:
-                      if file_path.match(rule['pattern']):
-                          found_owners = rule['owners']
-                          break
+                      for pattern in rule['patterns']:
+                          if file_path.match(pattern):
+                              found_owners = rule['owners']
+                              break
+                      if found_owners:
+                          break # Stop checking other rules (First Match Wins)
                   
                   if not found_owners:
                       logging.warning(f"File {file_path} has no owner in CODEOWNERS-DWH. Failing.")
