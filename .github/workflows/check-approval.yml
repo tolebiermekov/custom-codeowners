@@ -97,33 +97,32 @@ jobs:
                               
                           raw_pattern = parts[0]
                           owner_strings = parts[1:]
+                          patterns_to_check = []
                           
                           if raw_pattern == '*':
-                              pattern = '*'  # Handle the global '*' glob
+                              patterns_to_check.append('*')
                           elif raw_pattern == '**':
-                              pattern = '**' # Handle the global recursive '**' glob
+                              patterns_to_check.append('**')
                           elif raw_pattern.startswith('/'):
-                              # Handle root-anchored paths.
-                              # pathlib.match() is root-anchored by default, so just strip the '/'.
-                              pattern = raw_pattern[1:]
+                              # Root-anchored path. Only one pattern.
+                              patterns_to_check.append(raw_pattern[1:])
                           else:
-                              # Handle "floating" paths. Prepend '**/' to match anywhere.
-                              pattern = f"**/{raw_pattern}"
+                              patterns_to_check.append(raw_pattern)
+                              patterns_to_check.append(f"**/{raw_pattern}")
           
-                          # EDGE CASE: Fix for pathlib's handling of '**'.
-                          # A pattern like '.../docs/**' needs to become '.../docs/**/*'
-                          # to correctly match files *within* that directory.
-                          if pattern.endswith('/**') and pattern != '**':
-                              pattern = f"{pattern}/*"
+                          final_patterns = []
+                          for p in patterns_to_check:
+                              if p.endswith('/**') and p != '**':
+                                  final_patterns.append(f"{p}/*")
+                              else:
+                                  final_patterns.append(p)
 
-                          # Explicitly filter out team owners (`@org/team`) by checking for '/'. 
-                          # This action only supports individual user owners.
                           owners = {o.replace('@', '') for o in owner_strings if '/' not in o}
                           if not owners:
                               logging.warning(f"No owners found for pattern on line {line_number}: {raw_pattern}")
                               continue
                               
-                          rules.append({'pattern': pattern, 'owners': owners})
+                          rules.append({'patterns': final_patterns, 'owners': owners})
               
               except FileNotFoundError:
                   fail(f"Failed to read {filepath}: File not found.")
