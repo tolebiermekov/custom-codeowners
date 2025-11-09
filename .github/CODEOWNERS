@@ -1,1 +1,2 @@
-/config/other/general_file.sql @tolebiermekov # Это SQL файл
+/README.md @ml24-sys
+services.py @tolebiermekov
