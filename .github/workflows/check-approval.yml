@@ -71,7 +71,7 @@ jobs:
               fail(f"Failed to get context: {e}")
           
           CODEOWNERS_FILE = '.github/CODEOWNERS-DWH'
-
+          
           rules = []
           try:
               with open(CODEOWNERS_FILE, 'r') as f:
@@ -85,21 +85,22 @@ jobs:
                       except ValueError as e:
                           logging.warning(f"Skipping malformed line {line_number}: {line} | Error: {e}")
                           continue
-          
                       if not parts:
                            continue
                            
                       raw_pattern = parts[0]
                       owner_strings = parts[1:]
-                      if raw_pattern.startswith('/'):
+                      
+                      if raw_pattern == '*':
+                          pattern = '*'
+                      elif raw_pattern == '**':
+                          pattern = '**'
+                      elif raw_pattern.startswith('/'):
                           pattern = raw_pattern[1:]
                       else:
                           pattern = f"**/{raw_pattern}"
-
-                      if pattern == '*':
-                          pattern = '**'
-                      
-                      if pattern.endswith('/**'):
+          
+                      if pattern.endswith('/**') and pattern != '**':
                           pattern = f"{pattern}/*"
 
                       owners = set(o.replace('@', '') for o in owner_strings if '/' not in o)
@@ -114,7 +115,7 @@ jobs:
               fail(f"Failed to read {CODEOWNERS_FILE}: File not found.")
           except Exception as e:
               fail(f"Failed to parse {CODEOWNERS_FILE}: {e}")
-
+          
           try:
               files_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files'
               files_json = make_request(files_url, HEADERS)
