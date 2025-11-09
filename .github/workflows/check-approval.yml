@@ -83,18 +83,20 @@ jobs:
                       raw_pattern = parts[0]
                       owner_strings = parts[1:]
                       
-                      # pathlib.Path.match не понимает / в начале,
-                      # но он по умолчанию привязан к корню, что нам и нужно.
-                      # Убираем / если он есть.
                       if raw_pattern.startswith('/'):
                           pattern = raw_pattern[1:]
                       else:
-                          # Для "плавающих" правил (без /) добавляем **
                           pattern = f"**/{raw_pattern}"
 
-                      # Глобальный '*' должен стать '**'
                       if pattern == '*':
                           pattern = '**'
+                      
+                      # === ВОТ ИЗМЕНЕНИЕ ===
+                      # pathlib.match с '**' не всегда включает файлы,
+                      # поэтому добавим '/*' для явного совпадения файлов
+                      if pattern.endswith('/**'):
+                          pattern = f"{pattern}/*"
+                      # === КОНЕЦ ИЗМЕНЕНИЯ ===
 
                       owners = set(o.replace('@', '') for o in owner_strings if '/' not in o)
                       rules.append({'pattern': pattern, 'owners': owners})
@@ -104,16 +106,13 @@ jobs:
           except Exception as e:
               fail(f"Failed to parse {CODEOWNERS_FILE}: {e}")
           
-          # Get all changed files in PR
           try:
               files_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files'
               files_json = make_request(files_url, HEADERS)
-              # Конвертируем пути в объекты Path
               changed_files = [Path(f['filename']) for f in files_json]
           except Exception as e:
               fail(f"Failed to get changed files: {e}")
           
-          # Get all users who clicked Approved
           try:
               reviews_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews'
               reviews_json = make_request(reviews_url, HEADERS)
@@ -135,9 +134,7 @@ jobs:
           for file_path in changed_files:
               last_match_owners = None
           
-              # Last Match Wins
               for rule in rules:
-                  # Используем file_path.match() вместо fnmatch
                   if file_path.match(rule['pattern']):
                       last_match_owners = rule['owners']
           
@@ -152,7 +149,7 @@ jobs:
                   all_files_covered = False
                   uncovered_files.append(f"- {file_path} (requires: {', '.join(last_match_owners)})")
               else:
-                  logging.info(f"PR for {file_path} is covered by approval from: {', '.join(intersection)}")
+                logging.info(f"PR for {file_path} is covered by approval from: {', '.join(intersection)}")
           
           if all_files_covered:
               logging.info("All changed files are covered by owners.")
@@ -164,3 +161,4 @@ jobs:
                   f"{uncovered_files_str}"
               )
               fail(error_message)
+          EOF
