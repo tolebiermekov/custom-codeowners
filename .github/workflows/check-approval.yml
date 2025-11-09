@@ -72,15 +72,22 @@ jobs:
                   fail(f"Failed to get PR context: {e}")
 
           def parse_codeowners(filepath):
+              """
+              Parses the CODEOWNERS file.
+              This is the core logic for translating .gitignore-style
+              patterns into patterns that `pathlib` can understand.
+              """
               rules = []
               try:
                   with open(filepath, 'r') as f:
                       for line_number, line in enumerate(f, 1):
+                          # Strip comments and whitespace *before* parsing.
                           line = line.split('#', 1)[0].strip()
                           if not line:
                               continue
                           
                           try:
+                              # Correctly handles paths in quotes or with backslash-escaped spaces
                               parts = shlex.split(line)
                           except ValueError as e:
                               logging.warning(f"Skipping malformed line {line_number}: {line} | Error: {e}")
@@ -92,17 +99,25 @@ jobs:
                           owner_strings = parts[1:]
                           
                           if raw_pattern == '*':
-                              pattern = '*'
+                              pattern = '*'  # Handle the global '*' glob
                           elif raw_pattern == '**':
-                              pattern = '**'
+                              pattern = '**' # Handle the global recursive '**' glob
                           elif raw_pattern.startswith('/'):
+                              # Handle root-anchored paths.
+                              # pathlib.match() is root-anchored by default, so just strip the '/'.
                               pattern = raw_pattern[1:]
                           else:
+                              # Handle "floating" paths. Prepend '**/' to match anywhere.
                               pattern = f"**/{raw_pattern}"
           
+                          # EDGE CASE: Fix for pathlib's handling of '**'.
+                          # A pattern like '.../docs/**' needs to become '.../docs/**/*'
+                          # to correctly match files *within* that directory.
                           if pattern.endswith('/**') and pattern != '**':
                               pattern = f"{pattern}/*"
 
+                          # Explicitly filter out team owners (`@org/team`) by checking for '/'. 
+                          # This action only supports individual user owners.
                           owners = {o.replace('@', '') for o in owner_strings if '/' not in o}
                           if not owners:
                               logging.warning(f"No owners found for pattern on line {line_number}: {raw_pattern}")
@@ -133,7 +148,9 @@ jobs:
               return approved_users
 
           def check_file_coverage(changed_files, rules, approved_users):
+              """Checks every changed file against the ruleset."""
               uncovered_files_list = []
+              
               reversed_rules = list(reversed(rules))
 
               for file_path in changed_files:
@@ -142,7 +159,7 @@ jobs:
                       if file_path.match(rule['pattern']):
                           found_owners = rule['owners']
                           break
-
+                  
                   if not found_owners:
                       logging.warning(f"File {file_path} has no owner in CODEOWNERS-DWH. Failing.")
                       uncovered_files_list.append(f"- {file_path} (has NO owner assigned in CODEOWNERS-DWH)")
@@ -160,19 +177,18 @@ jobs:
               try:
                   if not TOKEN:
                       fail("GITHUB_TOKEN is not set.")
-                      
+          
                   owner, repo, pr_number = get_pr_context()
-                  
                   rules = parse_codeowners(CODEOWNERS_FILE)
                   changed_files = get_changed_files(owner, repo, pr_number)
                   approved_users = get_approved_users(owner, repo, pr_number)
-
+          
                   if not approved_users:
                       fail('No "Approve" found on this PR.')
                   logging.info(f"Found approvals from: {', '.join(approved_users)}")
-
+          
                   uncovered_files = check_file_coverage(changed_files, rules, approved_users)
-                  
+          
                   if uncovered_files:
                       uncovered_files_str = '\n'.join(uncovered_files)
                       error_message = (
