@@ -29,10 +29,10 @@ jobs:
           import os
           import sys
           import json
-          import fnmatch
           import urllib.request
           import urllib.error
           import logging
+          from pathlib import Path
           
           logging.basicConfig(
               level=logging.INFO,
@@ -71,7 +71,6 @@ jobs:
           
           CODEOWNERS_FILE = '.github/CODEOWNERS-DWH'
           
-          # Parse the CODEOWNERS-DWH
           rules = []
           try:
               with open(CODEOWNERS_FILE, 'r') as f:
@@ -83,14 +82,20 @@ jobs:
                       parts = line.split()
                       raw_pattern = parts[0]
                       owner_strings = parts[1:]
-          
-                      pattern = raw_pattern
-          
+                      
+                      # pathlib.Path.match не понимает / в начале,
+                      # но он по умолчанию привязан к корню, что нам и нужно.
+                      # Убираем / если он есть.
+                      if raw_pattern.startswith('/'):
+                          pattern = raw_pattern[1:]
+                      else:
+                          # Для "плавающих" правил (без /) добавляем **
+                          pattern = f"**/{raw_pattern}"
+
+                      # Глобальный '*' должен стать '**'
                       if pattern == '*':
                           pattern = '**'
-                      elif pattern.startswith('/'):
-                          pattern = pattern[1:]
-          
+
                       owners = set(o.replace('@', '') for o in owner_strings if '/' not in o)
                       rules.append({'pattern': pattern, 'owners': owners})
           
@@ -103,7 +108,8 @@ jobs:
           try:
               files_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files'
               files_json = make_request(files_url, HEADERS)
-              changed_files = [f['filename'] for f in files_json]
+              # Конвертируем пути в объекты Path
+              changed_files = [Path(f['filename']) for f in files_json]
           except Exception as e:
               fail(f"Failed to get changed files: {e}")
           
@@ -123,31 +129,30 @@ jobs:
           except Exception as e:
               fail(f"Failed to get reviews: {e}")
           
-          # Checking logic
           all_files_covered = True
           uncovered_files = []
           
-          for file in changed_files:
+          for file_path in changed_files:
               last_match_owners = None
           
               # Last Match Wins
               for rule in rules:
-                  if fnmatch.fnmatch(file, rule['pattern']) or \
-                     (rule['pattern'].endswith('/') and file.startswith(rule['pattern'])):
+                  # Используем file_path.match() вместо fnmatch
+                  if file_path.match(rule['pattern']):
                       last_match_owners = rule['owners']
           
               if not last_match_owners:
-                  logging.warning(f"File {file} has no owner in CODEOWNERS-DWH. Failing.")
+                  logging.warning(f"File {file_path} has no owner in CODEOWNERS-DWH. Failing.")
                   all_files_covered = False
-                  uncovered_files.append(f"- {file} (has NO owner assigned in CODEOWNERS-DWH)")
+                  uncovered_files.append(f"- {file_path} (has NO owner assigned in CODEOWNERS-DWH)")
                   continue
           
               intersection = approved_users.intersection(last_match_owners)
               if not intersection:
                   all_files_covered = False
-                  uncovered_files.append(f"- {file} (requires: {', '.join(last_match_owners)})")
+                  uncovered_files.append(f"- {file_path} (requires: {', '.join(last_match_owners)})")
               else:
-                  logging.info(f"PR is covered by approval from: {', '.join(intersection)}")
+                  logging.info(f"PR for {file_path} is covered by approval from: {', '.join(intersection)}")
           
           if all_files_covered:
               logging.info("All changed files are covered by owners.")
@@ -159,4 +164,3 @@ jobs:
                   f"{uncovered_files_str}"
               )
               fail(error_message)
-          EOF
