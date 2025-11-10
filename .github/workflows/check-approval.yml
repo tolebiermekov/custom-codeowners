@@ -1,6 +1,10 @@
 name: Check PR Approval
 
 on:
+  pull_request:
+    types: [ opened, synchronize, reopened ]
+    branches:
+      - main
   pull_request_review:
     types: [submitted]
 
@@ -181,11 +185,6 @@ jobs:
                   rules = parse_codeowners(CODEOWNERS_FILE)
                   changed_files = get_changed_files(owner, repo, pr_number)
                   approved_users = get_approved_users(owner, repo, pr_number)
-
-                  if not approved_users:
-                      fail('No "Approve" found on this PR.')
-                  logging.info(f"Found approvals from: {', '.join(approved_users)}")
-
                   uncovered_files = check_file_coverage(changed_files, rules, approved_users)
                   
                   if uncovered_files:
