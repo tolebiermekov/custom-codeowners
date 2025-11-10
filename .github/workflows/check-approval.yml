@@ -57,11 +57,30 @@ jobs:
                   with urllib.request.urlopen(req) as response:
                       if response.status >= 300:
                           raise Exception(f"API request failed with status {response.status}: {response.read().decode()}")
-                      return json.loads(response.read().decode('utf-8'))
+                      headers = response.info()
+                      data = json.loads(response.read().decode('utf-8'))
+                      return data, headers
               except urllib.error.HTTPError as e:
                   raise Exception(f"HTTPError when requesting {url}: {e.code} {e.reason}")
               except Exception as e:
                   raise Exception(f"Failed during request to {url}: {e}")
+
+          def get_next_page(headers):
+              link_header = headers.get('Link')
+              if not link_header:
+                  return None
+              links = link_header.split(',')
+              for link in links:
+                  parts = link.split(';')
+                  if len(parts) == 2:
+                      try:
+                          url_part = parts[0].strip()[1:-1]
+                          rel_part = parts[1].strip()
+                          if rel_part == 'rel="next"':
+                              return url_part
+                      except Exception:
+                          continue
+              return None
 
           def get_pr_context():
               try:
@@ -131,19 +150,39 @@ jobs:
               return rules
 
           def get_changed_files(owner, repo, pr_number):
-              files_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files'
-              files_json = make_request(files_url)
-              return [Path(f['filename']) for f in files_json]
+              all_files = []
+              next_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files?per_page=100'
+              
+              while next_url:
+                  logging.info(f"Fetching changed files from: {next_url}")
+                  data, headers = make_request(next_url)
+                  
+                  all_files.extend([Path(f['filename']) for f in data])
+                  
+                  next_url = get_next_page(headers)
+                  
+              logging.info(f"Total files found: {len(all_files)}")
+              return all_files
 
           def get_approved_users(owner, repo, pr_number):
-              reviews_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews'
-              reviews_json = make_request(reviews_url)
-              approved_users = {
-                  review['user']['login']
-                  for review in reviews_json
-                  if review['state'] == 'APPROVED'
-              }
-              return approved_users
+              all_approved_users = set()
+              next_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews?per_page=100'
+              
+              while next_url:
+                  logging.info(f"Fetching reviews from: {next_url}")
+                  data, headers = make_request(next_url)
+                  
+                  approved_in_page = {
+                      review['user']['login']
+                      for review in data
+                      if review['state'] == 'APPROVED'
+                  }
+                  all_approved_users.update(approved_in_page)
+                  
+                  next_url = get_next_page(headers)
+              
+              logging.info(f"Found approvals from: {', '.join(all_approved_users) if all_approved_users else 'None'}")
+              return all_approved_users
 
           def check_file_coverage(changed_files, rules, approved_users):
               uncovered_files_list = []
