@@ -1,8 +1,7 @@
 import os
 import sys
 import json
-import urllib.request
-import urllib.error
+import requests
 import logging
 from pathlib import Path
 import shlex
@@ -23,17 +22,15 @@ def fail(message):
 
 
 def make_request(url):
-    req = urllib.request.Request(url, headers=HEADERS)
     try:
-        with urllib.request.urlopen(req) as response:
-            if response.status >= 300:
-                raise Exception(f"API request failed with status {response.status}: {response.read().decode()}")
-            headers = response.info()
-            data = json.loads(response.read().decode('utf-8'))
-            return data, headers
-    except urllib.error.HTTPError as e:
-        raise Exception(f"HTTPError when requesting {url}: {e.code} {e.reason}")
-    except Exception as e:
+        response = requests.get(url, headers=HEADERS)
+        response.raise_for_status() 
+        data = response.json()
+        headers = response.headers
+        return data, headers
+    except requests.exceptions.HTTPError as e:
+        raise Exception(f"HTTPError when requesting {url}: {e.response.status_code} {e.response.reason}")
+    except requests.exceptions.RequestException as e:
         raise Exception(f"Failed during request to {url}: {e}")
 
 
@@ -77,7 +74,6 @@ def parse_codeowners(filepath):
                     continue
                 
                 try:
-                    # Safely parse paths with spaces
                     parts = shlex.split(line)
                 except ValueError as e:
                     logging.warning(f"Skipping malformed line {line_number}: {line} | Error: {e}")
@@ -94,26 +90,23 @@ def parse_codeowners(filepath):
                 elif raw_pattern == '**':
                     patterns_to_check.append('**')
                 elif raw_pattern.startswith('/'):
-                    patterns_to_check.append(raw_pattern[1:])  # Root-anchored path
+                    patterns_to_check.append(raw_pattern[1:])
                 else:
                     patterns_to_check.append(raw_pattern)
                     patterns_to_check.append(f"**/{raw_pattern}")
 
                 final_patterns = []
                 for p in patterns_to_check:
-                    # Edge case: '.../**' must become '.../**/*' to match files
                     if p.endswith('/**') and p != '**':
                         final_patterns.append(f"{p}/*")
                     else:
                         final_patterns.append(p)
 
-                # This script intentionally ignores team owners (@org/team)
                 owners = {o.replace('@', '') for o in owner_strings if '/' not in o}
                 if not owners:
                     logging.warning(f"No owners found for pattern on line {line_number}: {raw_pattern}")
                     continue
                     
-                # Store a list of patterns for each rule
                 rules.append({'patterns': final_patterns, 'owners': owners})
     
     except FileNotFoundError:
@@ -123,7 +116,7 @@ def parse_codeowners(filepath):
     
     return rules
 
-
+    
 def get_changed_files(owner, repo, pr_number):
     all_files = []
     next_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files?per_page=100'
@@ -131,15 +124,13 @@ def get_changed_files(owner, repo, pr_number):
     while next_url:
         logging.info(f"Fetching changed files from: {next_url}")
         data, headers = make_request(next_url)
-        
         all_files.extend([Path(f['filename']) for f in data])
-        
         next_url = get_next_page(headers)
         
     logging.info(f"Total files found: {len(all_files)}")
     return all_files
 
-  
+    
 def get_approved_users(owner, repo, pr_number):
     all_approved_users = set()
     next_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews?per_page=100'
@@ -147,24 +138,20 @@ def get_approved_users(owner, repo, pr_number):
     while next_url:
         logging.info(f"Fetching reviews from: {next_url}")
         data, headers = make_request(next_url)
-        
         approved_in_page = {
             review['user']['login']
             for review in data
             if review['state'] == 'APPROVED'
         }
         all_approved_users.update(approved_in_page)
-        
         next_url = get_next_page(headers)
     
     logging.info(f"Found approvals from: {', '.join(all_approved_users) if all_approved_users else 'None'}")
     return all_approved_users
 
-  
+    
 def check_file_coverage(changed_files, rules, approved_users):
     uncovered_files_list = []
-    
-    # Reverse rules to turn "Last Match Wins" into "First Match Wins"
     reversed_rules = list(reversed(rules))
 
     for file_path in changed_files:
@@ -197,7 +184,6 @@ def main():
             fail("GITHUB_TOKEN is not set.")
             
         owner, repo, pr_number = get_pr_context()
-        
         rules = parse_codeowners(CODEOWNERS_FILE)
         changed_files = get_changed_files(owner, repo, pr_number)
         approved_users = get_approved_users(owner, repo, pr_number)
@@ -216,6 +202,7 @@ def main():
     
     except Exception as e:
         fail(f"An unexpected error occurred: {e}")
+
 
 if __name__ == "__main__":
     main()
