@@ -1,2 +1,2 @@
-*.md @tolebiermekov
-/shared/*.md @ml24-sys
+* @tyermek
+/config/other/**/*.md @ml24-sys
