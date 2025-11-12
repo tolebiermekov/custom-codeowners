@@ -185,12 +185,14 @@ def check_file_coverage(changed_files, rules, approved_users):
 
 def main():
     try:
-        if not TOKEN:
-            fail("GITHUB_TOKEN is not set.")
-        if not GITHUB_EVENT_PATH:
-            fail("GITHUB_EVENT_PATH is not set.")
-        if not GITHUB_REPOSITORY:
-            fail("GITHUB_REPOSITORY is not set.")
+        REQUIRED_ENV_VARS = {
+            "GITHUB_TOKEN": TOKEN,
+            "GITHUB_EVENT_PATH": GITHUB_EVENT_PATH,
+            "GITHUB_REPOSITORY": GITHUB_REPOSITORY,
+        }
+        for var_name, value in REQUIRED_ENV_VARS.items():
+            if not value:
+                fail(f"{var_name} is not set.")
             
         owner, repo, pr_number = get_pr_context(GITHUB_REPOSITORY, GITHUB_EVENT_PATH)
         rules = parse_codeowners(CODEOWNERS_FILE)
