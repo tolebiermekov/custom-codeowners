@@ -9,6 +9,8 @@ import shlex
 logging.basicConfig(level=logging.INFO, format='%(message)s', stream=sys.stdout)
 
 TOKEN = os.environ.get('GITHUB_TOKEN', '')
+GITHUB_EVENT_PATH = os.environ.get('GITHUB_EVENT_PATH', '')
+GITHUB_REPOSITORY = os.environ.get('GITHUB_REPOSITORY', '')
 HEADERS = {
     'Authorization': f'token {TOKEN}',
     'Accept': 'application/vnd.github.v3+json'
@@ -52,14 +54,17 @@ def get_next_page(headers):
     return None
 
 
-def get_pr_context():
+def get_pr_context(repo_full_str, event_path_str):
     try:
-        repo_full = os.environ['GITHUB_REPOSITORY']
-        owner, repo = repo_full.split('/')
-        with open(os.environ['GITHUB_EVENT_PATH'], 'r') as f:
+        owner, repo = repo_full_str.split('/')
+        with open(event_path_str, 'r') as f:
             event_data = json.load(f)
         pr_number = event_data['pull_request']['number']
         return owner, repo, pr_number
+    except FileNotFoundError:
+        fail(f"Failed to read event path: {event_path_str}")
+    except (AttributeError, TypeError, KeyError):
+        fail("Failed to parse event data. GITHUB_REPOSITORY or GITHUB_EVENT_PATH seem invalid.")
     except Exception as e:
         fail(f"Failed to get PR context: {e}")
 
@@ -182,8 +187,12 @@ def main():
     try:
         if not TOKEN:
             fail("GITHUB_TOKEN is not set.")
+        if not GITHUB_EVENT_PATH:
+            fail("GITHUB_EVENT_PATH is not set.")
+        if not GITHUB_REPOSITORY:
+            fail("GITHUB_REPOSITORY is not set.")
             
-        owner, repo, pr_number = get_pr_context()
+        owner, repo, pr_number = get_pr_context(GITHUB_REPOSITORY, GITHUB_EVENT_PATH)
         rules = parse_codeowners(CODEOWNERS_FILE)
         changed_files = get_changed_files(owner, repo, pr_number)
         approved_users = get_approved_users(owner, repo, pr_number)
