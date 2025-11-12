@@ -8,9 +8,6 @@ permissions:
   pull-requests: read
   contents: read
 
-env:
-  UV_SYSTEM_PYTHON: 1
-
 jobs:
   check-approvals:
     runs-on: ubuntu-latest
@@ -18,15 +15,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.12'
-
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           version: "0.9.8"
+          python-version: "3.12"
           enable-cache: true
 
       - name: Install dependencies
@@ -35,4 +28,4 @@ jobs:
       - name: Check Approvals
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python .github/scripts/check_approvals.py
+        run: uv run .github/scripts/check_approvals.py
