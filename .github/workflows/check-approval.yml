@@ -28,4 +28,4 @@ jobs:
       - name: Check Approvals
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: uv run python .github/scripts/check_approvals.py
+        run: uv run .github/scripts/check_approvals.py
