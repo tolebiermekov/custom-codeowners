@@ -1,5 +1,4 @@
-* @ml24-sys 
-/config/other/**/*.md @tyermek
+* @ml24-sys @tyermek
 
 /.github/CODEOWNERS-DWH @tyermek
 
