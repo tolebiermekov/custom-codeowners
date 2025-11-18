@@ -75,6 +75,7 @@ def _process_logical_line(logical_line, line_start_number, rules_list):
         return
 
     try:
+        # Safely parse paths with spaces
         parts = shlex.split(line)
     except ValueError as e:
         logging.warning(f"Skipping malformed logical line (starting around L{line_start_number}): {line} | Error: {e}")
@@ -91,7 +92,7 @@ def _process_logical_line(logical_line, line_start_number, rules_list):
     elif raw_pattern == '**':
         patterns_to_check.append('**')
     elif raw_pattern.startswith('/'):
-        patterns_to_check.append(raw_pattern[1:])  # Root-anchored path
+        patterns_to_check.append(raw_pattern[1:])  # Path from root
     else:
         patterns_to_check.append(raw_pattern)
         patterns_to_check.append(f"**/{raw_pattern}")
@@ -103,6 +104,8 @@ def _process_logical_line(logical_line, line_start_number, rules_list):
             final_patterns.append(f"{p}/*")
         else:
             final_patterns.append(p)
+
+    # An owner MUST start with '@'.
     owners = {o.replace('@', '') for o in owner_strings if o.startswith('@')}
     
     if not owners:
@@ -114,7 +117,7 @@ def _process_logical_line(logical_line, line_start_number, rules_list):
 
 def parse_codeowners(filepath):
     rules = []
-    logical_line_buffer = ""
+    logical_line_buffer = ""  # Buffer for "stitched" multi-line rules
     logical_line_start_number = 1
     
     try:
@@ -125,22 +128,29 @@ def parse_codeowners(filepath):
                 line_stripped = line_no_comment.strip()
 
                 if not line_stripped:
+                    # Empty line = end of a rule. Process the buffer.
                     if logical_line_buffer:
                         _process_logical_line(logical_line_buffer, logical_line_start_number, rules)
                         logical_line_buffer = ""
                     logical_line_start_number = line_number + 1
                     continue
-                    
+                
+                # A new rule must start with a path pattern, not '@'
                 is_new_rule = not line_stripped.startswith('@')
                 
                 if is_new_rule:
+                    # Found a new rule. Process the old buffer first.
                     if logical_line_buffer:
                         _process_logical_line(logical_line_buffer, logical_line_start_number, rules)
+                    
+                    # Start a new buffer (removing any trailing '\')
                     logical_line_buffer = line_stripped.rstrip('\\').strip()
                     logical_line_start_number = line_number
                 else:
+                    # This is a continuation (line starts with '@'). Add to buffer.
                     logical_line_buffer += " " + line_stripped.rstrip('\\').strip()
-                    
+                
+                # Check for '\' at the end of the ORIGINAL (un-stripped) line
                 if line_no_comment.rstrip().endswith('\\'):
                     logical_line_buffer += " "
                     continue
@@ -150,6 +160,7 @@ def parse_codeowners(filepath):
                     logical_line_buffer = ""
                     logical_line_start_number = line_number + 1
             
+            # Process any remaining buffer at the end of the file
             if logical_line_buffer.strip():
                 _process_logical_line(logical_line_buffer, logical_line_start_number, rules)
 
