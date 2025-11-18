@@ -74,14 +74,17 @@ def parse_codeowners(filepath):
     try:
         with open(filepath, 'r') as f:
             content = f.read()
-            
+
+        # Support multi-line rules by joining lines that end with a '\'
+        # This allows for a more readable CODEOWNERS-DWH file.
+        # Example: "* @owner1 \ \n   @owner2" becomes "* @owner1 @owner2"
         processed_content = content.replace('\\\n', ' ')
 
         for line_number, line in enumerate(processed_content.splitlines(), 1):
             line = line.split('#', 1)[0].strip()
             if not line:
                 continue
-            
+
             try:
                 # Safely parse paths with spaces
                 parts = shlex.split(line)
@@ -90,11 +93,11 @@ def parse_codeowners(filepath):
                 continue
             if not parts:
                 continue
-                
+
             raw_pattern = parts[0]
             owner_strings = parts[1:]
             patterns_to_check = []
-            
+
             if raw_pattern == '*':
                 patterns_to_check.append('*')
             elif raw_pattern == '**':
@@ -118,10 +121,10 @@ def parse_codeowners(filepath):
             if not owners:
                 logging.warning(f"No owners found for pattern on line {line_number}: {raw_pattern}")
                 continue
-                
+
             # Store a list of patterns for each rule
             rules.append({'patterns': final_patterns, 'owners': owners})
-    
+
     except FileNotFoundError:
         fail(f"Failed to read {filepath}: File not found.")
     except Exception as e:
@@ -129,7 +132,7 @@ def parse_codeowners(filepath):
     
     return rules
 
-    
+
 def get_changed_files(owner, repo, pr_number):
     all_files = []
     next_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files?per_page=100'
@@ -137,13 +140,15 @@ def get_changed_files(owner, repo, pr_number):
     while next_url:
         logging.info(f"Fetching changed files from: {next_url}")
         data, headers = make_request(next_url)
+        
         all_files.extend([Path(f['filename']) for f in data])
+        
         next_url = get_next_page(headers)
         
     logging.info(f"Total files found: {len(all_files)}")
     return all_files
 
-    
+
 def get_approved_users(owner, repo, pr_number):
     all_approved_users = set()
     next_url = f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews?per_page=100'
@@ -151,20 +156,24 @@ def get_approved_users(owner, repo, pr_number):
     while next_url:
         logging.info(f"Fetching reviews from: {next_url}")
         data, headers = make_request(next_url)
+        
         approved_in_page = {
             review['user']['login']
             for review in data
             if review['state'] == 'APPROVED'
         }
         all_approved_users.update(approved_in_page)
+        
         next_url = get_next_page(headers)
     
     logging.info(f"Found approvals from: {', '.join(all_approved_users) if all_approved_users else 'None'}")
     return all_approved_users
 
-    
+
 def check_file_coverage(changed_files, rules, approved_users):
     uncovered_files_list = []
+    
+    # Reverse rules to turn "Last Match Wins" into "First Match Wins"
     reversed_rules = list(reversed(rules))
 
     for file_path in changed_files:
@@ -201,7 +210,7 @@ def main():
         for var_name, value in REQUIRED_ENV_VARS.items():
             if not value:
                 fail(f"{var_name} is not set.")
-            
+
         owner, repo, pr_number = get_pr_context(GITHUB_REPOSITORY, GITHUB_EVENT_PATH)
         rules = parse_codeowners(CODEOWNERS_FILE)
         changed_files = get_changed_files(owner, repo, pr_number)
