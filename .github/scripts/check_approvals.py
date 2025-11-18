@@ -143,7 +143,7 @@ def parse_codeowners(filepath):
                     if logical_line_buffer:
                         _process_logical_line(logical_line_buffer, logical_line_start_number, rules)
                     
-                    # Start a new buffer (removing any trailing '\')
+                    # Start new buffer (removing any trailing '\')
                     logical_line_buffer = line_stripped.rstrip('\\').strip()
                     logical_line_start_number = line_number
                 else:
@@ -155,6 +155,7 @@ def parse_codeowners(filepath):
                     logical_line_buffer += " "
                     continue
                 else:
+                    # This is the end of the rule (no '\'). Process the buffer.
                     if logical_line_buffer:
                         _process_logical_line(logical_line_buffer, logical_line_start_number, rules)
                     logical_line_buffer = ""
