@@ -73,46 +73,54 @@ def parse_codeowners(filepath):
     rules = []
     try:
         with open(filepath, 'r') as f:
-            for line_number, line in enumerate(f, 1):
-                line = line.split('#', 1)[0].strip()
-                if not line:
-                    continue
+            content = f.read()
+            
+        processed_content = content.replace('\\\n', ' ')
+
+        for line_number, line in enumerate(processed_content.splitlines(), 1):
+            line = line.split('#', 1)[0].strip()
+            if not line:
+                continue
+            
+            try:
+                # Safely parse paths with spaces
+                parts = shlex.split(line)
+            except ValueError as e:
+                logging.warning(f"Skipping malformed line {line_number}: {line} | Error: {e}")
+                continue
+            if not parts:
+                continue
                 
-                try:
-                    parts = shlex.split(line)
-                except ValueError as e:
-                    logging.warning(f"Skipping malformed line {line_number}: {line} | Error: {e}")
-                    continue
-                if not parts:
-                    continue
-                    
-                raw_pattern = parts[0]
-                owner_strings = parts[1:]
-                patterns_to_check = []
-                
-                if raw_pattern == '*':
-                    patterns_to_check.append('*')
-                elif raw_pattern == '**':
-                    patterns_to_check.append('**')
-                elif raw_pattern.startswith('/'):
-                    patterns_to_check.append(raw_pattern[1:])
+            raw_pattern = parts[0]
+            owner_strings = parts[1:]
+            patterns_to_check = []
+            
+            if raw_pattern == '*':
+                patterns_to_check.append('*')
+            elif raw_pattern == '**':
+                patterns_to_check.append('**')
+            elif raw_pattern.startswith('/'):
+                patterns_to_check.append(raw_pattern[1:])  # Root-anchored path
+            else:
+                patterns_to_check.append(raw_pattern)
+                patterns_to_check.append(f"**/{raw_pattern}")
+
+            final_patterns = []
+            for p in patterns_to_check:
+                # Edge case: '.../**' must become '.../**/*' to match files
+                if p.endswith('/**') and p != '**':
+                    final_patterns.append(f"{p}/*")
                 else:
-                    patterns_to_check.append(raw_pattern)
-                    patterns_to_check.append(f"**/{raw_pattern}")
+                    final_patterns.append(p)
 
-                final_patterns = []
-                for p in patterns_to_check:
-                    if p.endswith('/**') and p != '**':
-                        final_patterns.append(f"{p}/*")
-                    else:
-                        final_patterns.append(p)
-
-                owners = {o.replace('@', '') for o in owner_strings if '/' not in o}
-                if not owners:
-                    logging.warning(f"No owners found for pattern on line {line_number}: {raw_pattern}")
-                    continue
-                    
-                rules.append({'patterns': final_patterns, 'owners': owners})
+            # This script intentionally ignores team owners (@org/team)
+            owners = {o.replace('@', '') for o in owner_strings if '/' not in o}
+            if not owners:
+                logging.warning(f"No owners found for pattern on line {line_number}: {raw_pattern}")
+                continue
+                
+            # Store a list of patterns for each rule
+            rules.append({'patterns': final_patterns, 'owners': owners})
     
     except FileNotFoundError:
         fail(f"Failed to read {filepath}: File not found.")
