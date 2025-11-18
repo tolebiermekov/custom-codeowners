@@ -1,3 +1,3 @@
 # custom-codeowners
 
-1s
+1ss
