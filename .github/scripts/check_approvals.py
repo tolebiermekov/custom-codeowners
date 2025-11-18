@@ -98,6 +98,7 @@ def _process_logical_line(logical_line, line_start_number, rules_list):
 
     final_patterns = []
     for p in patterns_to_check:
+        # Edge case: '.../**' must become '.../**/*' to match files
         if p.endswith('/**') and p != '**':
             final_patterns.append(f"{p}/*")
         else:
@@ -129,16 +130,17 @@ def parse_codeowners(filepath):
                         logical_line_buffer = ""
                     logical_line_start_number = line_number + 1
                     continue
+                    
                 is_new_rule = not line_stripped.startswith('@')
                 
                 if is_new_rule:
                     if logical_line_buffer:
                         _process_logical_line(logical_line_buffer, logical_line_start_number, rules)
-                    
-                    logical_line_buffer = line_stripped
+                    logical_line_buffer = line_stripped.rstrip('\\').strip()
                     logical_line_start_number = line_number
                 else:
-                    logical_line_buffer += " " + line_stripped
+                    logical_line_buffer += " " + line_stripped.rstrip('\\').strip()
+                    
                 if line_no_comment.rstrip().endswith('\\'):
                     logical_line_buffer += " "
                     continue
