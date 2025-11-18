@@ -1,3 +1,2 @@
 # custom-codeowners
-
-1
+e
