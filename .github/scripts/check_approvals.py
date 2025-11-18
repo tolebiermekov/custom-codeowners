@@ -69,61 +69,77 @@ def get_pr_context(repo_full_str, event_path_str):
         fail(f"Failed to get PR context: {e}")
 
 
+def _process_logical_line(logical_line, line_start_number, rules_list):
+    line = logical_line.strip()
+    if not line:
+        return
+
+    try:
+        # Safely parse paths with spaces
+        parts = shlex.split(line)
+    except ValueError as e:
+        logging.warning(f"Skipping malformed logical line (starting around L{line_start_number}): {line} | Error: {e}")
+        return
+    if not parts:
+        return
+
+    raw_pattern = parts[0]
+    owner_strings = parts[1:]
+    patterns_to_check = []
+
+    if raw_pattern == '*':
+        patterns_to_check.append('*')
+    elif raw_pattern == '**':
+        patterns_to_check.append('**')
+    elif raw_pattern.startswith('/'):
+        patterns_to_check.append(raw_pattern[1:])  # Root-anchored path
+    else:
+        patterns_to_check.append(raw_pattern)
+        patterns_to_check.append(f"**/{raw_pattern}")
+
+    final_patterns = []
+    for p in patterns_to_check:
+        # Edge case: '.../**' must become '.../**/*' to match files
+        if p.endswith('/**') and p != '**':
+            final_patterns.append(f"{p}/*")
+        else:
+            final_patterns.append(p)
+
+    # This script intentionally ignores team owners (@org/team)
+    owners = {o.replace('@', '') for o in owner_strings if '/' not in o}
+    if not owners:
+        logging.warning(f"No owners found for pattern on logical line (starting around L{line_start_number}): {raw_pattern}")
+        return
+        
+    rules_list.append({'patterns': final_patterns, 'owners': owners})
+
+
 def parse_codeowners(filepath):
     rules = []
+    logical_line_buffer = ""
+    logical_line_start_number = 1
+    
     try:
         with open(filepath, 'r') as f:
-            content = f.read()
-
-        # Support multi-line rules by joining lines that end with a '\'
-        # This allows for a more readable CODEOWNERS-DWH file.
-        # Example: "* @owner1 \ \n   @owner2" becomes "* @owner1 @owner2"
-        processed_content = content.replace('\\\n', ' ')
-
-        for line_number, line in enumerate(processed_content.splitlines(), 1):
-            line = line.split('#', 1)[0].strip()
-            if not line:
-                continue
-
-            try:
-                # Safely parse paths with spaces
-                parts = shlex.split(line)
-            except ValueError as e:
-                logging.warning(f"Skipping malformed line {line_number}: {line} | Error: {e}")
-                continue
-            if not parts:
-                continue
-
-            raw_pattern = parts[0]
-            owner_strings = parts[1:]
-            patterns_to_check = []
-
-            if raw_pattern == '*':
-                patterns_to_check.append('*')
-            elif raw_pattern == '**':
-                patterns_to_check.append('**')
-            elif raw_pattern.startswith('/'):
-                patterns_to_check.append(raw_pattern[1:])  # Root-anchored path
-            else:
-                patterns_to_check.append(raw_pattern)
-                patterns_to_check.append(f"**/{raw_pattern}")
-
-            final_patterns = []
-            for p in patterns_to_check:
-                # Edge case: '.../**' must become '.../**/*' to match files
-                if p.endswith('/**') and p != '**':
-                    final_patterns.append(f"{p}/*")
+            for line_number, current_line in enumerate(f, 1):
+                line_no_comment = current_line.split('#', 1)[0]
+            
+                if line_no_comment.rstrip().endswith('\\'):
+                    logical_line_buffer += line_no_comment.rstrip()[:-1].strip() + " "
+                    if not logical_line_buffer.strip():
+                        logical_line_start_number = line_number
+                    continue
                 else:
-                    final_patterns.append(p)
+                    logical_line_buffer += line_no_comment.strip()
 
-            # This script intentionally ignores team owners (@org/team)
-            owners = {o.replace('@', '') for o in owner_strings if '/' not in o}
-            if not owners:
-                logging.warning(f"No owners found for pattern on line {line_number}: {raw_pattern}")
-                continue
-
-            # Store a list of patterns for each rule
-            rules.append({'patterns': final_patterns, 'owners': owners})
+                if logical_line_buffer.strip():
+                    _process_logical_line(logical_line_buffer, logical_line_start_number, rules)
+                
+                logical_line_buffer = ""
+                logical_line_start_number = line_number + 1
+                
+        if logical_line_buffer.strip():
+            _process_logical_line(logical_line_buffer, logical_line_start_number, rules)
 
     except FileNotFoundError:
         fail(f"Failed to read {filepath}: File not found.")
