@@ -75,7 +75,6 @@ def _process_logical_line(logical_line, line_start_number, rules_list):
         return
 
     try:
-        # Safely parse paths with spaces
         parts = shlex.split(line)
     except ValueError as e:
         logging.warning(f"Skipping malformed logical line (starting around L{line_start_number}): {line} | Error: {e}")
@@ -99,14 +98,12 @@ def _process_logical_line(logical_line, line_start_number, rules_list):
 
     final_patterns = []
     for p in patterns_to_check:
-        # Edge case: '.../**' must become '.../**/*' to match files
         if p.endswith('/**') and p != '**':
             final_patterns.append(f"{p}/*")
         else:
             final_patterns.append(p)
-
-    # This script intentionally ignores team owners (@org/team)
-    owners = {o.replace('@', '') for o in owner_strings if '/' not in o}
+    owners = {o.replace('@', '') for o in owner_strings if o.startswith('@')}
+    
     if not owners:
         logging.warning(f"No owners found for pattern on logical line (starting around L{line_start_number}): {raw_pattern}")
         return
@@ -122,24 +119,37 @@ def parse_codeowners(filepath):
     try:
         with open(filepath, 'r') as f:
             for line_number, current_line in enumerate(f, 1):
+                
                 line_no_comment = current_line.split('#', 1)[0]
-            
+                line_stripped = line_no_comment.strip()
+
+                if not line_stripped:
+                    if logical_line_buffer:
+                        _process_logical_line(logical_line_buffer, logical_line_start_number, rules)
+                        logical_line_buffer = ""
+                    logical_line_start_number = line_number + 1
+                    continue
+                is_new_rule = not line_stripped.startswith('@')
+                
+                if is_new_rule:
+                    if logical_line_buffer:
+                        _process_logical_line(logical_line_buffer, logical_line_start_number, rules)
+                    
+                    logical_line_buffer = line_stripped
+                    logical_line_start_number = line_number
+                else:
+                    logical_line_buffer += " " + line_stripped
                 if line_no_comment.rstrip().endswith('\\'):
-                    logical_line_buffer += line_no_comment.rstrip()[:-1].strip() + " "
-                    if not logical_line_buffer.strip():
-                        logical_line_start_number = line_number
+                    logical_line_buffer += " "
                     continue
                 else:
-                    logical_line_buffer += line_no_comment.strip()
-
-                if logical_line_buffer.strip():
-                    _process_logical_line(logical_line_buffer, logical_line_start_number, rules)
-                
-                logical_line_buffer = ""
-                logical_line_start_number = line_number + 1
-                
-        if logical_line_buffer.strip():
-            _process_logical_line(logical_line_buffer, logical_line_start_number, rules)
+                    if logical_line_buffer:
+                        _process_logical_line(logical_line_buffer, logical_line_start_number, rules)
+                    logical_line_buffer = ""
+                    logical_line_start_number = line_number + 1
+            
+            if logical_line_buffer.strip():
+                _process_logical_line(logical_line_buffer, logical_line_start_number, rules)
 
     except FileNotFoundError:
         fail(f"Failed to read {filepath}: File not found.")
