@@ -1,4 +1,4 @@
 # custom-codeowners
 
-1s
+1snn
 cx
