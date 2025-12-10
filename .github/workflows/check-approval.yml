@@ -29,6 +29,7 @@ jobs:
         run: uv pip install requests==2.32.5
 
       - name: Check Approvals
+        id: check
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: uv run .github/scripts/check_approvals.py
@@ -38,11 +39,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Find and re-run the failed check from pull_request event
-          gh run list \
-            --repo ${{ github.repository }} \
-            --branch ${{ github.head_ref }} \
-            --workflow "PR Approval Check" \
+          echo "Looking for failed runs to re-trigger..."
+          
+          # Find failed run ID (note: workflow name must match exactly)
+          FAILED_RUN_ID=$(gh run list \
+            --repo "${{ github.repository }}" \
+            --branch "${{ github.head_ref }}" \
+            --workflow "Check PR Approval" \
             --status failure \
-            --json databaseId \
-            --jq '.[0].databaseId' | xargs -I {} gh run rerun {} --repo ${{ github.repository }}
+            --json databaseId,event \
+            --jq '[.[] | select(.event == "pull_request")][0].databaseId')
+          
+          if [ -n "$FAILED_RUN_ID" ] && [ "$FAILED_RUN_ID" != "null" ]; then
+            echo "Re-running failed workflow run: $FAILED_RUN_ID"
+            gh run rerun "$FAILED_RUN_ID" --repo "${{ github.repository }}"
+          else
+            echo "No failed pull_request runs found to re-run"
+          fi
