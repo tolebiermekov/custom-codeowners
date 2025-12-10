@@ -32,3 +32,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: uv run .github/scripts/check_approvals.py
+
+      - name: Re-run failed PR check if now approved
+        if: github.event_name == 'pull_request_review' && steps.check.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Find and re-run the failed check from pull_request event
+          gh run list \
+            --repo ${{ github.repository }} \
+            --branch ${{ github.head_ref }} \
+            --workflow "PR Approval Check" \
+            --status failure \
+            --json databaseId \
+            --jq '.[0].databaseId' | xargs -I {} gh run rerun {} --repo ${{ github.repository }}
