@@ -41,18 +41,25 @@ jobs:
         run: |
           echo "Looking for failed runs to re-trigger..."
           
-          # Find failed run ID (note: workflow name must match exactly)
+          BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
+          echo "Branch: $BRANCH_NAME"
+          
+          # Find failed run ID
           FAILED_RUN_ID=$(gh run list \
             --repo "${{ github.repository }}" \
-            --branch "${{ github.head_ref }}" \
+            --branch "$BRANCH_NAME" \
             --workflow "Check PR Approval" \
             --status failure \
             --json databaseId,event \
-            --jq '[.[] | select(.event == "pull_request")][0].databaseId')
+            --jq '[.[] | select(.event == "pull_request")][0].databaseId' 2>/dev/null || echo "")
           
-          if [ -n "$FAILED_RUN_ID" ] && [ "$FAILED_RUN_ID" != "null" ]; then
-            echo "Re-running failed workflow run: $FAILED_RUN_ID"
-            gh run rerun "$FAILED_RUN_ID" --repo "${{ github.repository }}"
-          else
-            echo "No failed pull_request runs found to re-run"
+          if [ -z "$FAILED_RUN_ID" ] || [ "$FAILED_RUN_ID" = "null" ]; then
+            echo "✅ No failed pull_request runs found - nothing to re-run (this is OK)"
+            exit 0  # Explicitly exit successfully
           fi
+          
+          echo "Re-running failed workflow run: $FAILED_RUN_ID"
+          gh run rerun "$FAILED_RUN_ID" --repo "${{ github.repository }}" --failed || {
+            echo "⚠️ Could not re-run workflow (may already be running or completed)"
+            exit 0  # Don't fail the workflow if re-run fails
+          }
